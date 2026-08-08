@@ -22,7 +22,10 @@
     font-family: var(--sans); overflow: hidden;
     -webkit-tap-highlight-color: transparent;
   }
-  #gl { display: block; position: fixed; top: 0; left: 0; }
+  #gl {
+    display: block; position: fixed; top: 0; left: 0;
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
 
   .eyebrow {
     font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
@@ -122,9 +125,43 @@
   #pad .up { grid-area: 1 / 2; } #pad .left { grid-area: 2 / 1; }
   #pad .down { grid-area: 2 / 2; } #pad .right { grid-area: 2 / 3; }
 
+  /* ---------- 體感駕駛 ---------- */
+  #tiltui {
+    position: fixed; left: 14px; right: 14px; bottom: 92px; z-index: 21; display: none;
+    align-items: center; justify-content: space-between; gap: 12px; pointer-events: none;
+  }
+  #tiltui.show { display: flex; }
+  #brake {
+    pointer-events: auto; padding: 15px 20px; font-size: 12px;
+    background: rgba(14,17,22,.82); border-color: rgba(255,107,53,.55);
+  }
+  #brake[aria-pressed="true"] { background: var(--orange); border-color: var(--orange); color: #14181E; }
+  #steerbar { position: relative; width: min(220px, 40vw); height: 2px; background: var(--line); }
+  #steerbar::before {
+    content: ""; position: absolute; left: 50%; top: -4px; width: 1px; height: 10px;
+    background: var(--line); transform: translateX(-50%);
+  }
+  #steerdot {
+    position: absolute; top: -6px; left: 50%; width: 8px; height: 14px;
+    background: var(--yellow); border-radius: 1px; transform: translateX(-50%);
+  }
+  #rotate {
+    position: fixed; inset: 0; z-index: 25; display: none; place-items: center;
+    background: rgba(14,17,22,.94); text-align: center; padding: 24px;
+  }
+  #rotate.show { display: grid; }
+  #rotate .glyph { font-size: 46px; line-height: 1; margin-bottom: 16px; }
+  #rotate p { font-family: var(--mono); font-size: 12px; color: var(--muted); line-height: 1.9; margin: 0; }
+  #rotate b { display: block; font-family: var(--sans); font-size: 19px; color: var(--paper); margin-bottom: 8px; }
+
   @media (max-width: 760px) {
     #panel { width: auto; left: 10px; right: 10px; top: 10px; max-height: 44vh; }
     .cell { padding: 7px 10px 9px; }
+  }
+  /* 橫拿時把控制台縮到左半邊，別擋住跑道 */
+  @media (max-width: 900px) and (orientation: landscape) {
+    #panel { width: 230px; right: auto; max-height: calc(100vh - 90px); }
+    #tiltui { bottom: 78px; }
   }
 </style>
 </head>
@@ -168,6 +205,7 @@
       <div class="row">
         <button id="mAuto" aria-pressed="true">自動繞圈</button>
         <button id="mManual" aria-pressed="false">手動駕駛</button>
+        <button id="mTilt" aria-pressed="false" hidden>體感駕駛</button>
       </div>
       <div class="hint" id="driveHint">方向鍵或 WASD 可駕駛（切到手動）。</div>
     </div>
@@ -247,6 +285,18 @@
   <button class="left" data-k="left" aria-label="左轉">◀</button>
   <button class="down" data-k="down" aria-label="煞車或倒車">▼</button>
   <button class="right" data-k="right" aria-label="右轉">▶</button>
+</div>
+
+<div id="tiltui">
+  <button id="brake" aria-pressed="false">煞車</button>
+  <div id="steerbar"><div id="steerdot"></div></div>
+</div>
+
+<div id="rotate">
+  <div>
+    <div class="glyph">⟳</div>
+    <p><b>把手機橫著拿</b>左右傾斜轉向，按住畫面加速。</p>
+  </div>
 </div>
 
 <div id="hud" class="hide">
@@ -940,6 +990,40 @@ function nearest(pos){
 
 function fmt(ms){ return (ms/1000).toFixed(1); }
 
+/* ---------- 體感駕駛：用陀螺儀左右傾斜轉向 ---------- */
+const tilt = {
+  bound: false, needCal: true, got: false, timer: 0,
+  center: 0, raw: 0, target: 0, steer: 0
+};
+const TILT_RANGE = 0.45;   // 大約傾斜 27 度就打滿方向
+const TILT_DEAD = 0.08;    // 死區，手抖不會亂轉
+
+function screenAngle(){
+  if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+  return ((window.orientation || 0) + 360) % 360;   // 舊版 iOS 的 -90 要換算成 270
+}
+
+function onOrient(e){
+  if (e.beta === null || e.gamma === null) return;
+  tilt.got = true;
+  const rad = Math.PI/180;
+  const b = e.beta*rad, g = e.gamma*rad;
+  /* 世界的「上」在裝置座標裡指向哪 */
+  const ux = -Math.sin(g)*Math.cos(b), uy = Math.sin(b);
+  /* 螢幕的「右」在裝置座標裡指向哪（隨橫拿方向改變） */
+  const a = screenAngle()*rad;
+  const rx = Math.cos(a), ry = -Math.sin(a);
+  /* 兩者的內積：手機往左傾為正，和鍵盤左鍵同號 */
+  const s = ux*rx + uy*ry;
+  if (tilt.needCal){ tilt.center = s; tilt.needCal = false; }
+  tilt.raw = s;
+
+  let v = (s - tilt.center) / TILT_RANGE;
+  const sign = v < 0 ? -1 : 1;
+  v = Math.abs(v) < TILT_DEAD ? 0 : (v - sign*TILT_DEAD) / (1 - TILT_DEAD);
+  tilt.target = Math.max(-1, Math.min(1, v));
+}
+
 function tick(dt){
   const maxSpeed = targetKmh / 3.6;
 
@@ -954,7 +1038,14 @@ function tick(dt){
     car.speed += acc*dt;
     car.speed *= (1 - 0.7*dt);
     car.speed = Math.max(-maxSpeed*0.4, Math.min(maxSpeed, car.speed));
-    const steer = (keys.left ? 1 : 0) - (keys.right ? 1 : 0);
+    let steer;
+    if (mode === 'tilt'){
+      tilt.steer += (tilt.target - tilt.steer) * Math.min(1, dt*12);   // 濾掉手抖
+      steer = tilt.steer;
+      $('steerdot').style.left = (50 - steer*46) + '%';
+    } else {
+      steer = (keys.left ? 1 : 0) - (keys.right ? 1 : 0);
+    }
     const grip = Math.min(1, Math.abs(car.speed)/4 + 0.18);
     car.heading += steer * dt * 1.8 * grip * (car.speed < -0.05 ? -1 : 1);
     car.pos.x += Math.sin(car.heading) * car.speed * dt;
@@ -1380,6 +1471,7 @@ function enterTrack(){
   hud.classList.remove('hide');
   sound.rev = 0.9;
   startAudio();
+  updateRotateHint();
 }
 
 function handleFiles(fileList){
@@ -1437,19 +1529,86 @@ $('fold').addEventListener('click', function(){
   $('fold').textContent = panel.classList.contains('collapsed') ? '＋' : '－';
 });
 
-$('mAuto').addEventListener('click', function(){
-  u = nearest(car.pos).prog;
-  mode = 'auto';
-  pressGroup(['mAuto','mManual'], 'mAuto');
-  $('pad').style.display = 'none';
-  $('driveHint').textContent = '沿著跑道自動繞圈，速度可以調。';
+const MODE_BTN = { auto: 'mAuto', manual: 'mManual', tilt: 'mTilt' };
+const MODE_HINT = {
+  auto: '沿著跑道自動繞圈，速度可以調。',
+  manual: '↑加速　↓煞車／倒車　←→轉向（也可用 WASD）。',
+  tilt: '手機橫著拿，左右傾斜轉向，按住畫面加速。'
+};
+
+function updateRotateHint(){
+  const portrait = window.matchMedia('(orientation: portrait)').matches;
+  $('rotate').classList.toggle('show', mode === 'tilt' && ready && portrait);
+}
+
+function setMode(m){
+  if (m === 'auto') u = nearest(car.pos).prog;
+  mode = m;
+  keys.up = keys.down = keys.left = keys.right = false;
+  $('brake').setAttribute('aria-pressed', 'false');
+  pressGroup(['mAuto','mManual','mTilt'], MODE_BTN[m]);
+  $('pad').style.display = (m === 'manual' && window.matchMedia('(pointer: coarse)').matches) ? 'grid' : 'none';
+  $('tiltui').classList.toggle('show', m === 'tilt');
+  $('driveHint').textContent = MODE_HINT[m];
+  updateRotateHint();
+}
+
+/* iOS 13 以後要在使用者手勢裡跟系統要權限才讀得到陀螺儀 */
+function requestTilt(){
+  const DOE = window.DeviceOrientationEvent;
+  if (!DOE) return Promise.resolve(false);
+  if (typeof DOE.requestPermission !== 'function') return Promise.resolve(true);
+  return DOE.requestPermission()
+    .then(function(r){ return r === 'granted'; })
+    .catch(function(){ return false; });
+}
+
+$('mAuto').addEventListener('click', function(){ setMode('auto'); });
+$('mManual').addEventListener('click', function(){ setMode('manual'); });
+$('mTilt').addEventListener('click', function(){
+  requestTilt().then(function(ok){
+    if (!ok){
+      $('driveHint').textContent = '這台裝置不讓網頁讀陀螺儀，先用手動駕駛吧。';
+      return;
+    }
+    if (!tilt.bound){ window.addEventListener('deviceorientation', onOrient); tilt.bound = true; }
+    tilt.needCal = true;                     // 用現在拿的角度當中心，怎麼拿都行
+    tilt.got = false; tilt.target = 0; tilt.steer = 0;
+    setMode('tilt');
+    clearTimeout(tilt.timer);
+    tilt.timer = setTimeout(function(){
+      if (!tilt.got && mode === 'tilt'){
+        setMode('manual');
+        $('driveHint').textContent = '收不到陀螺儀的資料，先用方向鍵開吧。';
+      }
+    }, 2500);
+  });
 });
-$('mManual').addEventListener('click', function(){
-  mode = 'manual';
-  pressGroup(['mAuto','mManual'], 'mManual');
-  $('driveHint').textContent = '↑加速　↓煞車／倒車　←→轉向（也可用 WASD）。';
-  if (window.matchMedia('(pointer: coarse)').matches) $('pad').style.display = 'grid';
+if (window.DeviceOrientationEvent && window.matchMedia('(pointer: coarse)').matches) $('mTilt').hidden = false;
+
+/* 按住畫面加速，放開就收油 */
+canvas.addEventListener('pointerdown', function(e){
+  if (mode !== 'tilt' || !ready) return;
+  e.preventDefault();
+  keys.up = true;
 });
+window.addEventListener('pointerup', function(){ if (mode === 'tilt') keys.up = false; });
+window.addEventListener('pointercancel', function(){ if (mode === 'tilt') keys.up = false; });
+
+(function(){
+  const b = $('brake');
+  const press = function(e){ e.preventDefault(); keys.down = true; b.setAttribute('aria-pressed', 'true'); };
+  const release = function(){ keys.down = false; b.setAttribute('aria-pressed', 'false'); };
+  b.addEventListener('pointerdown', press);
+  b.addEventListener('pointerup', release);
+  b.addEventListener('pointerleave', release);
+  b.addEventListener('pointercancel', release);
+})();
+
+window.addEventListener('orientationchange', function(){ tilt.needCal = true; updateRotateHint(); });
+if (screen.orientation && screen.orientation.addEventListener){
+  screen.orientation.addEventListener('change', function(){ tilt.needCal = true; updateRotateHint(); });
+}
 
 $('speed').addEventListener('input', function(e){
   targetKmh = +e.target.value;
@@ -1560,7 +1719,7 @@ window.addEventListener('keydown', unlockAudio);
 document.addEventListener('visibilitychange', function(){
   if (!sound.ctx) return;
   if (document.hidden) sound.ctx.suspend();
-  else if (ready) sound.ctx.resume();
+  else if (ready) { sound.ctx.resume(); refreshSoundHint(); }
 });
 
 /* =====================================================================
@@ -1571,6 +1730,7 @@ function resize(){
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  updateRotateHint();
 }
 window.addEventListener('resize', resize);
 resize();
