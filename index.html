@@ -1024,6 +1024,8 @@ function onOrient(e){
   tilt.target = Math.max(-1, Math.min(1, v));
 }
 
+const DRAG = 0.7;   // 每秒的空氣阻力係數
+
 function tick(dt){
   const maxSpeed = targetKmh / 3.6;
 
@@ -1034,9 +1036,13 @@ function tick(dt){
     car.heading = Math.atan2(t.x, t.z);
     car.speed = maxSpeed;
   } else {
-    const acc = keys.up ? 9 : (keys.down ? -8 : 0);
+    /* 推力要跟著設定的最高速走，不然固定推力被阻力抵銷，
+       車速永遠卡在 9 / 0.7 ≈ 46 km/h，速度滑桿拉再高也沒用。
+       多給 15% 讓車子真的碰得到上限，煞車也一起等比放大。 */
+    const drive = DRAG * maxSpeed * 1.15;
+    const acc = keys.down ? -drive*0.9 : (keys.up ? drive : 0);
     car.speed += acc*dt;
-    car.speed *= (1 - 0.7*dt);
+    car.speed *= (1 - DRAG*dt);
     car.speed = Math.max(-maxSpeed*0.4, Math.min(maxSpeed, car.speed));
     let steer;
     if (mode === 'tilt'){
@@ -1545,6 +1551,7 @@ function setMode(m){
   if (m === 'auto') u = nearest(car.pos).prog;
   mode = m;
   keys.up = keys.down = keys.left = keys.right = false;
+  throttleId = null;
   $('brake').setAttribute('aria-pressed', 'false');
   pressGroup(['mAuto','mManual','mTilt'], MODE_BTN[m]);
   $('pad').style.display = (m === 'manual' && window.matchMedia('(pointer: coarse)').matches) ? 'grid' : 'none';
@@ -1586,14 +1593,22 @@ $('mTilt').addEventListener('click', function(){
 });
 if (window.DeviceOrientationEvent && window.matchMedia('(pointer: coarse)').matches) $('mTilt').hidden = false;
 
-/* 按住畫面加速，放開就收油 */
+/* 按住畫面加速，放開就收油。記住是哪根手指按的，
+   這樣另一手去點煞車時油門才不會跟著被放掉 */
+let throttleId = null;
 canvas.addEventListener('pointerdown', function(e){
   if (mode !== 'tilt' || !ready) return;
   e.preventDefault();
+  throttleId = e.pointerId;
   keys.up = true;
 });
-window.addEventListener('pointerup', function(){ if (mode === 'tilt') keys.up = false; });
-window.addEventListener('pointercancel', function(){ if (mode === 'tilt') keys.up = false; });
+function releaseThrottle(e){
+  if (throttleId === null || (e && e.pointerId !== throttleId)) return;
+  throttleId = null;
+  keys.up = false;
+}
+window.addEventListener('pointerup', releaseThrottle);
+window.addEventListener('pointercancel', releaseThrottle);
 
 (function(){
   const b = $('brake');
