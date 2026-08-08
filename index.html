@@ -143,7 +143,7 @@
       </p>
       <div class="starterrow">
         <label class="filebtn" for="file" id="pick">選擇檔案</label>
-        <button id="demo">先用範例車試跑</button>
+        <button id="demo">使用預設車款試跑</button>
       </div>
       <input id="file" type="file" multiple accept=".glb,.gltf,.stl,.obj,.mtl" hidden>
       <hr class="hair">
@@ -1200,8 +1200,6 @@ resize();
 car.pos.copy(pts[0]);
 car.heading = Math.atan2(tans[0].x, tans[0].z);
 place();
-
-loadDefaultCar();
 
 let last = performance.now();
 function loop(now){

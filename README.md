@@ -6,7 +6,7 @@
 
 打開 [`index.html`](./index.html) 即可（需透過 HTTP server 開啟，例如 GitHub Pages、`python -m http.server`，直接用 `file://` 開啟會因瀏覽器安全限制無法讀取預設車款檔案）。
 
-網站開啟後會自動載入 [`finished_cars/yellow_sport_car.glb`](./finished_cars/yellow_sport_car.glb) 當作預設車款，讓你不用選檔案就能馬上試跑；之後隨時可以拖檔案或按「換一台車」換成自己的作品。
+開啟頁面後會停留在起始畫面，讓你選擇要「使用預設車款試跑」（載入 [`finished_cars/yellow_sport_car.glb`](./finished_cars/yellow_sport_car.glb)）還是拖曳／選擇自己的模型檔案；進入跑道後也能隨時按「換一台車」重新選檔。
 
 ## 功能
 
