@@ -215,6 +215,18 @@
     <hr class="hair">
 
     <div class="grp">
+      <span class="eyebrow">聲音 <span class="val" id="vVol">70%</span></span>
+      <div class="row">
+        <button id="sndEngine" aria-pressed="true">引擎聲</button>
+        <button id="sndAmb" aria-pressed="true">環境音</button>
+      </div>
+      <input id="vol" type="range" min="0" max="100" value="70" step="1">
+      <div class="hint" id="sndHint">引擎聲會隨速度換檔，離開跑道會有碎石聲。</div>
+    </div>
+
+    <hr class="hair">
+
+    <div class="grp">
       <div class="row">
         <button id="reset">重設計時</button>
         <button id="shot">存成圖片</button>
@@ -955,6 +967,7 @@ function tick(dt){
   if (isOff !== offTrack){
     offTrack = isOff;
     $('offtrack').style.display = isOff ? 'block' : 'none';
+    if (isOff) thump();
   }
 
   if (lastProg > 0.85 && n.prog < 0.15){
@@ -966,6 +979,7 @@ function tick(dt){
         best = t;
         $('tBest').innerHTML = fmt(t) + '<small>s</small>';
       }
+      lapChime();
       const el = $('lapnum');
       el.textContent = laps;
       el.classList.add('flash');
@@ -1015,7 +1029,338 @@ function updateCamera(dt){
 }
 
 /* =====================================================================
-   5. 介面
+   5. 聲音（全部用 Web Audio 即時合成，不需要任何音檔）
+   ===================================================================== */
+const sound = {
+  ctx: null, n: null,
+  engineOn: true, ambOn: true, vol: 0.7,
+  gear: 0, shift: 0, rev: 0, birdTimer: 0
+};
+/* 各檔位的「到頂速度」佔最高速的比例，用來讓轉速隨換檔上下跳 */
+const GEARS = [0.16, 0.30, 0.46, 0.64, 0.84, 1.0];
+const TOP_KMH = 140;   // 換檔用的固定滿檔速度，不隨速度滑桿變動
+const sndVec = new THREE.Vector3();
+
+function noiseBuffer(ctx, seconds, pink){
+  const len = Math.floor(ctx.sampleRate * seconds);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  let b0 = 0, b1 = 0, b2 = 0;
+  for (let i=0;i<len;i++){
+    const w = Math.random()*2 - 1;
+    if (pink){
+      b0 = 0.99765*b0 + w*0.0990460;
+      b1 = 0.96300*b1 + w*0.2965164;
+      b2 = 0.57000*b2 + w*1.0526913;
+      d[i] = (b0 + b1 + b2 + w*0.1848) * 0.22;
+    } else {
+      d[i] = w;
+    }
+  }
+  return buf;
+}
+function noiseSource(ctx, buf){
+  const s = ctx.createBufferSource();
+  s.buffer = buf;
+  s.loop = true;
+  s.start();
+  return s;
+}
+
+function buildAudio(){
+  if (sound.ctx) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  const ctx = new AC();
+  sound.ctx = ctx;
+
+  const master = ctx.createGain();
+  master.gain.value = sound.vol;
+  const comp = ctx.createDynamicsCompressor();   // 免得引擎拉轉時蓋掉一切
+  comp.threshold.value = -14;
+  comp.ratio.value = 6;
+  comp.attack.value = 0.004;
+  comp.release.value = 0.25;
+  master.connect(comp);
+  comp.connect(ctx.destination);
+
+  const white = noiseBuffer(ctx, 2, false);
+  const pink  = noiseBuffer(ctx, 4, true);
+
+  /* --- 車輛（引擎 + 輪胎），整條匯流排會依鏡頭距離與左右位置調整 --- */
+  const carBus = ctx.createGain();
+  carBus.gain.value = 0;
+  let panner = null;
+  if (ctx.createStereoPanner){
+    panner = ctx.createStereoPanner();
+    carBus.connect(panner);
+    panner.connect(master);
+  } else {
+    carBus.connect(master);
+  }
+
+  const engGain = ctx.createGain();
+  engGain.gain.value = 0;
+  engGain.connect(carBus);
+
+  const engFilt = ctx.createBiquadFilter();
+  engFilt.type = 'lowpass';
+  engFilt.frequency.value = 600;
+  engFilt.Q.value = 0.9;
+  engFilt.connect(engGain);
+
+  /* 四顆振盪器疊出點火頻率的諧波，聽起來才有引擎的厚度 */
+  const spec = [
+    { type: 'sawtooth', mul: 0.5, g: 0.50 },
+    { type: 'sawtooth', mul: 1,   g: 0.42 },
+    { type: 'square',   mul: 2,   g: 0.13 },
+    { type: 'sawtooth', mul: 3,   g: 0.07 }
+  ];
+  const oscs = [];
+  for (let i=0;i<spec.length;i++){
+    const o = ctx.createOscillator();
+    o.type = spec[i].type;
+    o.frequency.value = 50 * spec[i].mul;
+    o.detune.value = (i - 1.5) * 7;
+    const g = ctx.createGain();
+    g.gain.value = spec[i].g;
+    o.connect(g);
+    g.connect(engFilt);
+    o.start();
+    oscs.push({ osc: o, mul: spec[i].mul });
+  }
+
+  /* 進氣與排氣的氣流聲 */
+  const engNoise = ctx.createGain();
+  engNoise.gain.value = 0;
+  engNoise.connect(engGain);
+  const engNoiseF = ctx.createBiquadFilter();
+  engNoiseF.type = 'bandpass';
+  engNoiseF.frequency.value = 1200;
+  engNoiseF.Q.value = 0.7;
+  engNoiseF.connect(engNoise);
+  noiseSource(ctx, white).connect(engNoiseF);
+
+  /* 輪胎與路面（離開跑道時會變成低沉的碎石聲） */
+  const tyreGain = ctx.createGain();
+  tyreGain.gain.value = 0;
+  tyreGain.connect(carBus);
+  const tyreF = ctx.createBiquadFilter();
+  tyreF.type = 'bandpass';
+  tyreF.frequency.value = 800;
+  tyreF.Q.value = 0.5;
+  tyreF.connect(tyreGain);
+  noiseSource(ctx, pink).connect(tyreF);
+
+  /* --- 環境音：風聲 + 遠方人聲 --- */
+  const ambBus = ctx.createGain();
+  ambBus.gain.value = sound.ambOn ? 1 : 0;
+  ambBus.connect(master);
+
+  const windG = ctx.createGain();
+  windG.gain.value = 0.10;
+  windG.connect(ambBus);
+  const windF = ctx.createBiquadFilter();
+  windF.type = 'lowpass';
+  windF.frequency.value = 420;
+  windF.Q.value = 0.6;
+  windF.connect(windG);
+  noiseSource(ctx, pink).connect(windF);
+
+  const windLfo = ctx.createOscillator();       // 風的強弱起伏
+  windLfo.frequency.value = 0.07;
+  const windLfoG = ctx.createGain();
+  windLfoG.gain.value = 0.05;
+  windLfo.connect(windLfoG);
+  windLfoG.connect(windG.gain);
+  windLfo.start();
+
+  const windLfo2 = ctx.createOscillator();      // 音色也跟著飄
+  windLfo2.frequency.value = 0.041;
+  const windLfo2G = ctx.createGain();
+  windLfo2G.gain.value = 170;
+  windLfo2.connect(windLfo2G);
+  windLfo2G.connect(windF.frequency);
+  windLfo2.start();
+
+  const crowdG = ctx.createGain();
+  crowdG.gain.value = 0.045;
+  crowdG.connect(ambBus);
+  const crowdF = ctx.createBiquadFilter();
+  crowdF.type = 'bandpass';
+  crowdF.frequency.value = 640;
+  crowdF.Q.value = 1.2;
+  crowdF.connect(crowdG);
+  noiseSource(ctx, pink).connect(crowdF);
+
+  const crowdLfo = ctx.createOscillator();
+  crowdLfo.frequency.value = 0.13;
+  const crowdLfoG = ctx.createGain();
+  crowdLfoG.gain.value = 0.03;
+  crowdLfo.connect(crowdLfoG);
+  crowdLfoG.connect(crowdG.gain);
+  crowdLfo.start();
+
+  sound.n = {
+    master: master, carBus: carBus, panner: panner,
+    engGain: engGain, engFilt: engFilt, oscs: oscs,
+    engNoise: engNoise, engNoiseF: engNoiseF,
+    tyreGain: tyreGain, tyreF: tyreF, ambBus: ambBus
+  };
+}
+
+function refreshSoundHint(){
+  const el = $('sndHint');
+  if (!el) return;
+  el.textContent = (sound.ctx && sound.ctx.state === 'running')
+    ? '引擎聲會隨速度換檔，離開跑道會有碎石聲。'
+    : '在畫面上點一下就會開始發聲（瀏覽器規定）。';
+}
+
+function startAudio(){
+  buildAudio();
+  if (!sound.ctx) return;
+  if (sound.ctx.state === 'suspended'){
+    const p = sound.ctx.resume();
+    if (p && p.then) p.then(refreshSoundHint, refreshSoundHint);
+  }
+  scheduleBird();
+  refreshSoundHint();
+}
+
+function audioReady(){
+  return sound.ctx && sound.n && sound.ctx.state === 'running';
+}
+
+/* 偶爾來一聲鳥叫，讓跑道旁的樹有點存在感 */
+function chirp(){
+  if (!audioReady() || !sound.ambOn) return;
+  const ctx = sound.ctx, t0 = ctx.currentTime;
+  const notes = 2 + Math.floor(Math.random()*3);
+  const base = 1900 + Math.random()*1300;
+  for (let i=0;i<notes;i++){
+    const t = t0 + i*0.13;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    const g = ctx.createGain();
+    o.frequency.setValueAtTime(base, t);
+    o.frequency.exponentialRampToValueAtTime(base*1.5, t + 0.045);
+    o.frequency.exponentialRampToValueAtTime(base*0.9, t + 0.10);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.05, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    o.connect(g);
+    g.connect(sound.n.ambBus);
+    o.start(t);
+    o.stop(t + 0.15);
+  }
+}
+function scheduleBird(){
+  clearTimeout(sound.birdTimer);
+  sound.birdTimer = setTimeout(function(){ chirp(); scheduleBird(); }, 6000 + Math.random()*12000);
+}
+
+/* 完成一圈的提示音 */
+function lapChime(){
+  if (!audioReady()) return;
+  const ctx = sound.ctx, t0 = ctx.currentTime;
+  const freqs = [880, 1320];
+  for (let i=0;i<freqs.length;i++){
+    const t = t0 + i*0.11;
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.value = freqs[i];
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.13, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+    o.connect(g);
+    g.connect(sound.n.master);
+    o.start(t);
+    o.stop(t + 0.45);
+  }
+}
+
+/* 壓上草地的那一下悶響 */
+function thump(){
+  if (!audioReady()) return;
+  const ctx = sound.ctx, t = ctx.currentTime;
+  const o = ctx.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(150, t);
+  o.frequency.exponentialRampToValueAtTime(48, t + 0.18);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.22, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+  o.connect(g);
+  g.connect(sound.n.master);
+  o.start(t);
+  o.stop(t + 0.3);
+}
+
+function updateAudio(dt){
+  if (!audioReady()) return;
+  const n = sound.n, ctx = sound.ctx, t = ctx.currentTime;
+
+  const kmh = Math.abs(car.speed) * 3.6;
+  const sn = Math.min(1, kmh / TOP_KMH);
+
+  /* 換檔：轉速在每一檔內從低爬到高，跨檔時歸零重來 */
+  let gi = 0;
+  while (gi < GEARS.length - 1 && sn > GEARS[gi]) gi++;
+  const lo = gi ? GEARS[gi-1] : 0;
+  let rpm = 0.18 + 0.82 * Math.min(1, (sn - lo) / Math.max(0.001, GEARS[gi] - lo));
+  if (gi !== sound.gear){
+    if (gi > sound.gear) sound.shift = 0.12;   // 升檔才收油，降檔不用
+    sound.gear = gi;
+  }
+  if (sound.shift > 0) sound.shift -= dt;
+
+  let load;
+  if (mode === 'auto') load = 0.55 + 0.35*sn;
+  else load = keys.up ? 1 : (keys.down ? 0.25 : 0.4);
+
+  if (sound.rev > 0){                          // 進場先補一腳油
+    sound.rev -= dt;
+    rpm = Math.max(rpm, 0.2 + 0.8*Math.sin(Math.PI * (1 - Math.max(0, sound.rev)/0.9)));
+    load = 1;
+  } else if (sound.shift > 0){
+    load *= 0.3;
+  }
+
+  /* 一點點抖動，免得定速繞圈時聽起來像一直嗡嗡叫的電風扇 */
+  const f = (32 + rpm*112) * (1 + 0.013*Math.sin(t*7.3) + 0.006*Math.sin(t*2.1));
+  for (let i=0;i<n.oscs.length;i++) n.oscs[i].osc.frequency.setTargetAtTime(f * n.oscs[i].mul, t, 0.05);
+  n.engFilt.frequency.setTargetAtTime(340 + rpm*2600*(0.4 + 0.6*load), t, 0.06);
+  n.engGain.gain.setTargetAtTime(0.06 + 0.20*rpm*load, t, 0.05);
+  n.engNoise.gain.setTargetAtTime(0.015 + 0.055*rpm*load, t, 0.06);
+  n.engNoiseF.frequency.setTargetAtTime(700 + rpm*2200, t, 0.06);
+
+  n.tyreF.frequency.setTargetAtTime(offTrack ? 320 : 700 + kmh*8, t, 0.08);
+  n.tyreGain.gain.setTargetAtTime((offTrack ? 0.20 : 0.06) * (0.2 + 0.8*sn), t, 0.08);
+
+  /* 鏡頭離車越遠聲音越小，並依車子在畫面上的左右位置分配聲道 */
+  const dx = carPivot.position.x - camera.position.x;
+  const dy = carPivot.position.y - camera.position.y;
+  const dz = carPivot.position.z - camera.position.z;
+  const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+  const near = ready && sound.engineOn ? 1 / (1 + dist/22) : 0;
+  n.carBus.gain.setTargetAtTime(near, t, 0.1);
+  if (n.panner){
+    const e = camera.matrixWorld.elements;
+    const ahead = dx*(-e[8]) + dy*(-e[9]) + dz*(-e[10]);   // car 在鏡頭前方才算方位
+    let p = 0;
+    if (ahead > 0){
+      sndVec.copy(carPivot.position).project(camera);
+      p = Math.max(-0.85, Math.min(0.85, sndVec.x));
+    }
+    n.panner.pan.setTargetAtTime(p, t, 0.1);
+  }
+}
+
+/* =====================================================================
+   6. 介面
    ===================================================================== */
 const startEl = $('start'), panel = $('panel'), hud = $('hud'), errEl = $('err');
 
@@ -1033,6 +1378,8 @@ function enterTrack(){
   panel.classList.remove('collapsed');
   $('fold').textContent = '－';
   hud.classList.remove('hide');
+  sound.rev = 0.9;
+  startAudio();
 }
 
 function handleFiles(fileList){
@@ -1135,6 +1482,23 @@ $('color').addEventListener('input', function(){
 $('cChase').addEventListener('click', function(){ camMode = 'chase'; pressGroup(['cChase','cTop','cFree'], 'cChase'); });
 $('cTop').addEventListener('click',   function(){ camMode = 'top';   pressGroup(['cChase','cTop','cFree'], 'cTop'); });
 $('cFree').addEventListener('click',  function(){ camMode = 'free';  pressGroup(['cChase','cTop','cFree'], 'cFree'); });
+$('sndEngine').addEventListener('click', function(){
+  sound.engineOn = !sound.engineOn;
+  $('sndEngine').setAttribute('aria-pressed', String(sound.engineOn));
+  if (sound.engineOn) startAudio();
+});
+$('sndAmb').addEventListener('click', function(){
+  sound.ambOn = !sound.ambOn;
+  $('sndAmb').setAttribute('aria-pressed', String(sound.ambOn));
+  if (sound.ambOn) startAudio();
+  if (sound.n) sound.n.ambBus.gain.setTargetAtTime(sound.ambOn ? 1 : 0, sound.ctx.currentTime, 0.2);
+});
+$('vol').addEventListener('input', function(e){
+  sound.vol = +e.target.value / 100;
+  $('vVol').textContent = e.target.value + '%';
+  if (sound.n) sound.n.master.gain.setTargetAtTime(sound.vol, sound.ctx.currentTime, 0.05);
+});
+
 $('reset').addEventListener('click', resetRun);
 $('shot').addEventListener('click', function(){
   renderer.render(scene, camera);
@@ -1185,8 +1549,22 @@ canvas.addEventListener('wheel', function(e){
   orbit.r = Math.max(7, Math.min(190, orbit.r * (1 + (e.deltaY > 0 ? 1 : -1) * 0.09)));
 }, { passive: false });
 
+/* 瀏覽器規定要有使用者互動才能發聲；拖曳檔案進來的路徑不一定算，所以再補一次 */
+function unlockAudio(){
+  if (!ready || audioReady()) return;
+  startAudio();
+}
+window.addEventListener('pointerdown', unlockAudio);
+window.addEventListener('keydown', unlockAudio);
+
+document.addEventListener('visibilitychange', function(){
+  if (!sound.ctx) return;
+  if (document.hidden) sound.ctx.suspend();
+  else if (ready) sound.ctx.resume();
+});
+
 /* =====================================================================
-   6. 主迴圈
+   7. 主迴圈
    ===================================================================== */
 function resize(){
   const w = window.innerWidth, h = window.innerHeight;
@@ -1210,6 +1588,7 @@ function loop(now){
   if (ready) tick(dt);
   updateCamera(dt);
   renderer.render(scene, camera);
+  updateAudio(dt);
 }
 requestAnimationFrame(loop);
 </script>
