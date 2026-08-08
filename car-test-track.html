@@ -1,0 +1,1228 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>跑道測試場 · 讓你的 Tinkercad 車子繞圈</title>
+<style>
+  :root {
+    --ink: #0E1116;
+    --paper: #F2EDE3;
+    --muted: #7C8797;
+    --yellow: #FFC53D;
+    --orange: #FF6B35;
+    --line: rgba(242, 237, 227, 0.14);
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Roboto Mono", monospace;
+    --sans: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Hiragino Sans", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--ink); color: var(--paper);
+    font-family: var(--sans); overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #gl { display: block; position: fixed; top: 0; left: 0; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .hair { height: 1px; background: var(--line); border: 0; margin: 14px 0; }
+
+  button, .filebtn {
+    display: inline-block;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+    color: var(--paper); background: transparent;
+    border: 1px solid var(--line); border-radius: 2px;
+    padding: 7px 10px; cursor: pointer;
+    transition: border-color .15s, color .15s, background .15s;
+  }
+  button:hover, .filebtn:hover { border-color: var(--yellow); color: var(--yellow); }
+  button:focus-visible, .filebtn:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+  button[aria-pressed="true"] { background: var(--yellow); border-color: var(--yellow); color: #14181E; font-weight: 600; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .row > button, .row > .filebtn { flex: 1 1 auto; text-align: center; }
+
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 18px; background: transparent; margin: 2px 0 0; }
+  input[type=range]::-webkit-slider-runnable-track { height: 2px; background: var(--line); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 16px; margin-top: -7px; background: var(--yellow); border: 0; border-radius: 1px; cursor: grab; }
+  input[type=range]::-moz-range-track { height: 2px; background: var(--line); }
+  input[type=range]::-moz-range-thumb { width: 10px; height: 16px; background: var(--yellow); border: 0; border-radius: 1px; cursor: grab; }
+  input[type=color] { width: 100%; height: 26px; padding: 0; background: transparent; border: 1px solid var(--line); border-radius: 2px; cursor: pointer; }
+
+  /* ---------- 開始畫面 ---------- */
+  #start {
+    position: fixed; inset: 0; z-index: 30;
+    display: grid; place-items: center; padding: 20px;
+    background: linear-gradient(rgba(14,17,22,.62), rgba(14,17,22,.9));
+    overflow-y: auto;
+  }
+  #start.hide { display: none; }
+  .card { width: min(560px, 100%); }
+  .drop {
+    position: relative; border: 1px dashed rgba(255,197,61,.45); border-radius: 3px;
+    padding: 32px 26px 26px; background: rgba(16, 20, 26, .88);
+    backdrop-filter: blur(6px);
+  }
+  .drop.over { border-color: var(--yellow); background: rgba(255, 197, 61, .09); }
+  .drop::before, .drop::after { content: ""; position: absolute; width: 10px; height: 10px; border: 1px solid var(--yellow); }
+  .drop::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+  .drop::after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+  h1 { font-size: clamp(25px, 5vw, 36px); line-height: 1.18; margin: 10px 0 8px; font-weight: 700; letter-spacing: -0.01em; }
+  h1 em { font-style: normal; color: var(--yellow); }
+  .lede { color: #B9C0CA; font-size: 14px; line-height: 1.75; margin: 0 0 18px; }
+  .starterrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .formats { font-family: var(--mono); font-size: 11px; color: var(--muted); line-height: 1.95; }
+  .formats b { color: var(--paper); font-weight: 500; }
+  #err { color: var(--orange); font-family: var(--mono); font-size: 12px; margin-top: 12px; display: none; line-height: 1.65; }
+
+  /* ---------- 控制台 ---------- */
+  #panel {
+    position: fixed; top: 14px; left: 14px; z-index: 20;
+    width: 234px; max-height: calc(100vh - 120px); overflow-y: auto;
+    padding: 13px; background: rgba(14, 17, 22, .88);
+    border: 1px solid var(--line); border-radius: 3px; backdrop-filter: blur(10px);
+  }
+  #panel.collapsed .body { display: none; }
+  .phead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .phead button { padding: 3px 8px; }
+  .grp { margin-top: 12px; }
+  .grp > .eyebrow { display: block; margin-bottom: 6px; }
+  .val { font-family: var(--mono); font-size: 11px; color: var(--yellow); float: right; letter-spacing: 0; }
+  .hint { font-family: var(--mono); font-size: 10px; color: var(--muted); line-height: 1.7; margin-top: 7px; }
+
+  /* ---------- 儀表 ---------- */
+  #hud {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex;
+    border-top: 1px solid var(--line);
+    background: linear-gradient(to top, rgba(14,17,22,.96), rgba(14,17,22,.7));
+    backdrop-filter: blur(8px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  #hud.hide { display: none; }
+  #barwrap { position: absolute; top: -1px; left: 0; right: 0; height: 2px; }
+  #bar { height: 2px; background: var(--yellow); width: 0%; }
+  .cell { flex: 1 1 0; padding: 9px 14px 11px; border-right: 1px solid var(--line); min-width: 0; }
+  .cell:last-child { border-right: 0; }
+  .cell .num { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: clamp(17px, 3.4vw, 25px); line-height: 1.1; margin-top: 3px; white-space: nowrap; }
+  .cell .num small { font-size: 11px; color: var(--muted); margin-left: 3px; letter-spacing: .05em; }
+  #lapnum.flash { color: var(--yellow); }
+  #offtrack {
+    position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%); z-index: 21;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .14em; color: #14181E;
+    background: var(--orange); padding: 5px 12px; border-radius: 2px; display: none;
+  }
+
+  #pad {
+    position: fixed; right: 14px; bottom: 96px; z-index: 21; display: none;
+    grid-template-columns: repeat(3, 50px); grid-template-rows: repeat(2, 50px); gap: 6px;
+  }
+  #pad button { font-size: 17px; padding: 0; background: rgba(14,17,22,.82); border-color: rgba(255,197,61,.4); }
+  #pad .up { grid-area: 1 / 2; } #pad .left { grid-area: 2 / 1; }
+  #pad .down { grid-area: 2 / 2; } #pad .right { grid-area: 2 / 3; }
+
+  @media (max-width: 760px) {
+    #panel { width: auto; left: 10px; right: 10px; top: 10px; max-height: 44vh; }
+    .cell { padding: 7px 10px 9px; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+
+<div id="start">
+  <div class="card">
+    <div class="drop" id="drop">
+      <span class="eyebrow">Proving ground · 跑道測試場</span>
+      <h1>把你的車丟進來，<br><em>開上跑道繞圈</em></h1>
+      <p class="lede">
+        從 Tinkercad 匯出模型，拖到這個框裡，或按下面的按鈕選檔案。
+        車子會自動縮放、貼地、擺到起跑線上，然後開始跑圈計時。
+      </p>
+      <div class="starterrow">
+        <label class="filebtn" for="file" id="pick">選擇檔案</label>
+        <button id="demo">先用範例車試跑</button>
+      </div>
+      <input id="file" type="file" multiple accept=".glb,.gltf,.stl,.obj,.mtl" hidden>
+      <hr class="hair">
+      <div class="formats">
+        <b>建議用 .glb</b>　單一檔案、保留顏色<br>
+        也吃 <b>.stl</b>（無顏色）和 <b>.obj</b>（可連 .mtl 一起選）<br>
+        Tinkercad 匯出路徑：右上角 <b>Export → .glTF (.glb)</b>
+      </div>
+      <div id="err"></div>
+    </div>
+  </div>
+</div>
+
+<div id="panel" class="collapsed" hidden>
+  <div class="phead">
+    <span class="eyebrow">控制台</span>
+    <button id="fold" aria-label="收合控制台">－</button>
+  </div>
+  <div class="body">
+    <div class="grp">
+      <span class="eyebrow">駕駛模式</span>
+      <div class="row">
+        <button id="mAuto" aria-pressed="true">自動繞圈</button>
+        <button id="mManual" aria-pressed="false">手動駕駛</button>
+      </div>
+      <div class="hint" id="driveHint">方向鍵或 WASD 可駕駛（切到手動）。</div>
+    </div>
+
+    <div class="grp">
+      <span class="eyebrow">速度 <span class="val" id="vSpeed">40 km/h</span></span>
+      <input id="speed" type="range" min="5" max="140" value="40" step="1">
+    </div>
+
+    <hr class="hair">
+
+    <div class="grp">
+      <span class="eyebrow">車身方向</span>
+      <div class="row">
+        <button id="yawL" title="逆時針 90 度">↺ 90°</button>
+        <button id="yawR" title="順時針 90 度">↻ 90°</button>
+        <button id="flip" aria-pressed="false" title="模型躺平或站錯時按這裡">直立修正</button>
+      </div>
+      <div class="hint">車頭不對就轉一下；整台躺平就按「直立修正」。</div>
+    </div>
+
+    <div class="grp">
+      <span class="eyebrow">大小 <span class="val" id="vScale">1.0×</span></span>
+      <input id="scale" type="range" min="0.25" max="3" value="1" step="0.05">
+    </div>
+
+    <div class="grp">
+      <span class="eyebrow">車身顏色</span>
+      <div class="row"><button id="ownColor" aria-pressed="true">用模型原色</button></div>
+      <input id="color" type="color" value="#e23b2e" style="margin-top:6px">
+    </div>
+
+    <hr class="hair">
+
+    <div class="grp">
+      <span class="eyebrow">攝影機</span>
+      <div class="row">
+        <button id="cChase" aria-pressed="true">跟車</button>
+        <button id="cTop" aria-pressed="false">空拍</button>
+        <button id="cFree" aria-pressed="false">環繞</button>
+      </div>
+      <div class="hint">「環繞」可拖曳旋轉、滾輪縮放。</div>
+    </div>
+
+    <hr class="hair">
+
+    <div class="grp">
+      <div class="row">
+        <button id="reset">重設計時</button>
+        <button id="shot">存成圖片</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <label class="filebtn" for="file2">換一台車</label>
+        <input id="file2" type="file" multiple accept=".glb,.gltf,.stl,.obj,.mtl" hidden>
+      </div>
+      <div class="hint" id="minfo"></div>
+    </div>
+  </div>
+</div>
+
+<div id="offtrack">離開跑道</div>
+
+<div id="pad">
+  <button class="up" data-k="up" aria-label="加速">▲</button>
+  <button class="left" data-k="left" aria-label="左轉">◀</button>
+  <button class="down" data-k="down" aria-label="煞車或倒車">▼</button>
+  <button class="right" data-k="right" aria-label="右轉">▶</button>
+</div>
+
+<div id="hud" class="hide">
+  <div id="barwrap"><div id="bar"></div></div>
+  <div class="cell"><span class="eyebrow">時速</span><div class="num" id="tSpeed">0<small>km/h</small></div></div>
+  <div class="cell"><span class="eyebrow">圈數</span><div class="num" id="lapnum">0</div></div>
+  <div class="cell"><span class="eyebrow">本圈</span><div class="num" id="tCur">0.0<small>s</small></div></div>
+  <div class="cell"><span class="eyebrow">最快圈</span><div class="num" id="tBest">--<small>s</small></div></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+"use strict";
+
+/* =====================================================================
+   1. 模型解析（GLB / glTF / STL / OBJ，不依賴額外 loader）
+   ===================================================================== */
+function matIdentity(){ return [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]; }
+function matMul(a,b){
+  const o = new Array(16);
+  for (let c=0;c<4;c++) for (let r=0;r<4;r++)
+    o[c*4+r] = a[r]*b[c*4] + a[4+r]*b[c*4+1] + a[8+r]*b[c*4+2] + a[12+r]*b[c*4+3];
+  return o;
+}
+function matFromTRS(t,q,s){
+  const x=q[0], y=q[1], z=q[2], w=q[3];
+  const x2=x+x, y2=y+y, z2=z+z;
+  const xx=x*x2, xy=x*y2, xz=x*z2, yy=y*y2, yz=y*z2, zz=z*z2, wx=w*x2, wy=w*y2, wz=w*z2;
+  const sx=s[0], sy=s[1], sz=s[2];
+  return [
+    (1-(yy+zz))*sx, (xy+wz)*sx, (xz-wy)*sx, 0,
+    (xy-wz)*sy, (1-(xx+zz))*sy, (yz+wx)*sy, 0,
+    (xz+wy)*sz, (yz-wx)*sz, (1-(xx+yy))*sz, 0,
+    t[0], t[1], t[2], 1
+  ];
+}
+function applyMat(m,x,y,z){
+  return [ m[0]*x+m[4]*y+m[8]*z+m[12], m[1]*x+m[5]*y+m[9]*z+m[13], m[2]*x+m[6]*y+m[10]*z+m[14] ];
+}
+function applyMat3(m,x,y,z){
+  return [ m[0]*x+m[4]*y+m[8]*z, m[1]*x+m[5]*y+m[9]*z, m[2]*x+m[6]*y+m[10]*z ];
+}
+function lin2srgb(v){
+  if (!(v>0)) return 0;
+  return v <= 0.0031308 ? v*12.92 : 1.055*Math.pow(v, 1/2.4) - 0.055;
+}
+
+const COMP = { 5120:{size:1,norm:127}, 5121:{size:1,norm:255}, 5122:{size:2,norm:32767},
+               5123:{size:2,norm:65535}, 5125:{size:4,norm:4294967295}, 5126:{size:4,norm:1} };
+const NUMC = { SCALAR:1, VEC2:2, VEC3:3, VEC4:4, MAT4:16 };
+
+function b64ToBuf(b64){
+  const bin = atob(b64), out = new Uint8Array(bin.length);
+  for (let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
+
+function parseGLTF(arrayBuffer){
+  const dv = new DataView(arrayBuffer);
+  let json = null, binChunk = null;
+  if (arrayBuffer.byteLength >= 4 && dv.getUint32(0,true) === 0x46546c67){
+    const total = dv.getUint32(8,true);
+    let off = 12;
+    while (off + 8 <= Math.min(total, arrayBuffer.byteLength)){
+      const len = dv.getUint32(off,true), type = dv.getUint32(off+4,true), start = off+8;
+      if (type === 0x4e4f534a) json = JSON.parse(new TextDecoder().decode(new Uint8Array(arrayBuffer,start,len)));
+      else if (type === 0x004e4942) binChunk = arrayBuffer.slice(start, start+len);
+      off = start + len;
+      if (len % 4 !== 0) off += 4 - (len % 4);
+    }
+    if (!json) throw new Error('這個 .glb 裡找不到模型資料。');
+  } else {
+    json = JSON.parse(new TextDecoder().decode(new Uint8Array(arrayBuffer)));
+  }
+
+  const buffers = (json.buffers || []).map(function(b){
+    if (!b.uri){
+      if (!binChunk) throw new Error('檔案缺少網格資料。');
+      return binChunk;
+    }
+    if (/^data:/.test(b.uri)) return b64ToBuf(b.uri.split(',')[1]);
+    throw new Error('這個 .gltf 把資料放在另一個 .bin 檔裡。請回 Tinkercad 改用 .glb 匯出。');
+  });
+
+  function readAccessor(i){
+    const acc = json.accessors[i], nc = NUMC[acc.type], comp = COMP[acc.componentType];
+    const out = new Float32Array(acc.count * nc);
+    if (acc.bufferView === undefined) return out;
+    const bv = json.bufferViews[acc.bufferView];
+    const view = new DataView(buffers[bv.buffer || 0]);
+    const base = (bv.byteOffset || 0) + (acc.byteOffset || 0);
+    const stride = bv.byteStride || comp.size * nc;
+    const get = {
+      5120: function(o){ return view.getInt8(o); },
+      5121: function(o){ return view.getUint8(o); },
+      5122: function(o){ return view.getInt16(o,true); },
+      5123: function(o){ return view.getUint16(o,true); },
+      5125: function(o){ return view.getUint32(o,true); },
+      5126: function(o){ return view.getFloat32(o,true); }
+    }[acc.componentType];
+    if (!get) throw new Error('檔案用了不支援的資料格式。');
+    for (let v=0; v<acc.count; v++){
+      for (let c=0; c<nc; c++){
+        let val = get(base + v*stride + c*comp.size);
+        if (acc.normalized && comp.norm !== 1) val = Math.max(val/comp.norm, -1);
+        out[v*nc+c] = val;
+      }
+    }
+    return out;
+  }
+  function readIndices(i){
+    const f = readAccessor(i), out = new Uint32Array(f.length);
+    for (let k=0;k<f.length;k++) out[k] = f[k];
+    return out;
+  }
+
+  const parts = [];
+  const sc = json.scenes ? json.scenes[json.scene || 0] : null;
+  const roots = (sc && sc.nodes) ? sc.nodes : (json.nodes || []).map(function(_,i){ return i; });
+
+  function walk(ni, parentMat){
+    const node = json.nodes[ni];
+    if (!node) return;
+    const local = node.matrix ? node.matrix.slice()
+      : matFromTRS(node.translation || [0,0,0], node.rotation || [0,0,0,1], node.scale || [1,1,1]);
+    const world = matMul(parentMat, local);
+
+    if (node.mesh !== undefined && json.meshes && json.meshes[node.mesh]){
+      const prims = json.meshes[node.mesh].primitives || [];
+      for (let pi=0; pi<prims.length; pi++){
+        const prim = prims[pi];
+        if (prim.mode !== undefined && prim.mode !== 4) continue;   // 只取三角形
+        const a = prim.attributes || {};
+        if (a.POSITION === undefined) continue;
+
+        const pos = readAccessor(a.POSITION);
+        const positions = new Float32Array(pos.length);
+        for (let v=0; v<pos.length/3; v++){
+          const p = applyMat(world, pos[v*3], pos[v*3+1], pos[v*3+2]);
+          positions[v*3] = p[0]; positions[v*3+1] = p[1]; positions[v*3+2] = p[2];
+        }
+
+        let normals = null;
+        if (a.NORMAL !== undefined){
+          const nrm = readAccessor(a.NORMAL);
+          normals = new Float32Array(nrm.length);
+          for (let v=0; v<nrm.length/3; v++){
+            const n = applyMat3(world, nrm[v*3], nrm[v*3+1], nrm[v*3+2]);
+            const L = Math.hypot(n[0],n[1],n[2]) || 1;
+            normals[v*3] = n[0]/L; normals[v*3+1] = n[1]/L; normals[v*3+2] = n[2]/L;
+          }
+        }
+
+        let colors = null;
+        if (a.COLOR_0 !== undefined){
+          const acc = json.accessors[a.COLOR_0], raw = readAccessor(a.COLOR_0), nc = NUMC[acc.type];
+          const div = (acc.normalized || acc.componentType === 5126) ? 1 : (COMP[acc.componentType].norm || 1);
+          const n = raw.length / nc;
+          colors = new Float32Array(n*3);
+          for (let v=0; v<n; v++){
+            colors[v*3]   = lin2srgb(raw[v*nc]   / div);
+            colors[v*3+1] = lin2srgb(raw[v*nc+1] / div);
+            colors[v*3+2] = lin2srgb(raw[v*nc+2] / div);
+          }
+        }
+
+        let color = [0.78,0.79,0.82], opacity = 1;
+        if (prim.material !== undefined && json.materials && json.materials[prim.material]){
+          const pbr = json.materials[prim.material].pbrMetallicRoughness || {};
+          if (pbr.baseColorFactor){
+            color = pbr.baseColorFactor.slice(0,3).map(lin2srgb);
+            opacity = pbr.baseColorFactor.length > 3 ? pbr.baseColorFactor[3] : 1;
+          }
+        }
+
+        parts.push({
+          positions: positions,
+          normals: normals,
+          colors: colors,
+          indices: prim.indices !== undefined ? readIndices(prim.indices) : null,
+          color: color,
+          opacity: opacity
+        });
+      }
+    }
+    const kids = node.children || [];
+    for (let k=0;k<kids.length;k++) walk(kids[k], world);
+  }
+  for (let r=0;r<roots.length;r++) walk(roots[r], matIdentity());
+  if (!parts.length) throw new Error('檔案裡沒有三角網格，可能是空的設計。');
+  return { parts: parts, zUp: false };
+}
+
+function parseSTL(arrayBuffer){
+  const dv = new DataView(arrayBuffer);
+  let isBinary = false;
+  if (arrayBuffer.byteLength > 84 && 84 + dv.getUint32(80,true)*50 === arrayBuffer.byteLength) isBinary = true;
+  if (!isBinary){
+    const head = new TextDecoder().decode(new Uint8Array(arrayBuffer, 0, Math.min(512, arrayBuffer.byteLength)));
+    if (!/^\s*solid/i.test(head)) isBinary = true;
+  }
+  const positions = [], normals = [];
+  if (isBinary){
+    const n = dv.getUint32(80,true);
+    for (let i=0;i<n;i++){
+      const o = 84 + i*50;
+      const nx = dv.getFloat32(o,true), ny = dv.getFloat32(o+4,true), nz = dv.getFloat32(o+8,true);
+      for (let v=0;v<3;v++){
+        const p = o + 12 + v*12;
+        positions.push(dv.getFloat32(p,true), dv.getFloat32(p+4,true), dv.getFloat32(p+8,true));
+        normals.push(nx,ny,nz);
+      }
+    }
+  } else {
+    const text = new TextDecoder().decode(new Uint8Array(arrayBuffer));
+    const facetRe = /facet\s+normal\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)([\s\S]*?)endfacet/g;
+    const vertRe = /vertex\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)/g;
+    let m;
+    while ((m = facetRe.exec(text))){
+      const nx = +m[1], ny = +m[2], nz = +m[3];
+      vertRe.lastIndex = 0;
+      const vs = []; let vm;
+      while ((vm = vertRe.exec(m[4]))) vs.push([+vm[1], +vm[2], +vm[3]]);
+      for (let k=1;k+1<vs.length;k++){
+        const tri = [0,k,k+1];
+        for (let j=0;j<3;j++){
+          positions.push(vs[tri[j]][0], vs[tri[j]][1], vs[tri[j]][2]);
+          normals.push(nx,ny,nz);
+        }
+      }
+    }
+  }
+  if (!positions.length) throw new Error('STL 檔裡沒有三角面。');
+  return { parts: [{ positions: new Float32Array(positions), normals: new Float32Array(normals),
+    colors: null, indices: null, color: [0.74,0.75,0.79], opacity: 1 }], zUp: true };
+}
+
+function parseOBJ(text, mtlText){
+  const mtl = {};
+  if (mtlText){
+    let cur = null;
+    const lines = mtlText.split(/\r?\n/);
+    for (let i=0;i<lines.length;i++){
+      const t = lines[i].trim().split(/\s+/);
+      if (t[0] === 'newmtl'){ cur = t.slice(1).join(' '); mtl[cur] = [0.8,0.8,0.8]; }
+      else if (t[0] === 'Kd' && cur) mtl[cur] = [+t[1], +t[2], +t[3]];
+    }
+  }
+  const V = [], N = [], groups = new Map();
+  let current = '__default__';
+  groups.set(current, { pos: [], nrm: [] });
+  const lines = text.split(/\r?\n/);
+  for (let i=0;i<lines.length;i++){
+    const line = lines[i].trim();
+    if (!line || line.charAt(0) === '#') continue;
+    const t = line.split(/\s+/);
+    if (t[0] === 'v') V.push([+t[1], +t[2], +t[3]]);
+    else if (t[0] === 'vn') N.push([+t[1], +t[2], +t[3]]);
+    else if (t[0] === 'usemtl'){
+      current = t.slice(1).join(' ');
+      if (!groups.has(current)) groups.set(current, { pos: [], nrm: [] });
+    } else if (t[0] === 'f'){
+      const face = t.slice(1).map(function(tok){
+        const p = tok.split('/');
+        let vi = parseInt(p[0],10), ni = p[2] ? parseInt(p[2],10) : NaN;
+        if (vi < 0) vi = V.length + 1 + vi;
+        if (ni < 0) ni = N.length + 1 + ni;
+        return { v: vi-1, n: isNaN(ni) ? -1 : ni-1 };
+      });
+      const g = groups.get(current);
+      for (let k=1;k+1<face.length;k++){
+        const tri = [face[0], face[k], face[k+1]];
+        for (let j=0;j<3;j++){
+          const p = V[tri[j].v] || [0,0,0];
+          g.pos.push(p[0], p[1], p[2]);
+          if (tri[j].n >= 0 && N[tri[j].n]) g.nrm.push(N[tri[j].n][0], N[tri[j].n][1], N[tri[j].n][2]);
+        }
+      }
+    }
+  }
+  const parts = [];
+  groups.forEach(function(g, name){
+    if (!g.pos.length) return;
+    parts.push({
+      positions: new Float32Array(g.pos),
+      normals: g.nrm.length === g.pos.length ? new Float32Array(g.nrm) : null,
+      colors: null, indices: null,
+      color: mtl[name] || [0.74,0.75,0.79],
+      opacity: 1
+    });
+  });
+  if (!parts.length) throw new Error('OBJ 檔裡沒有面資料。');
+  return { parts: parts, zUp: true };
+}
+
+/* =====================================================================
+   2. 場景與跑道
+   ===================================================================== */
+const CAR_LENGTH = 4.2;   // 自動縮放後的車長（公尺）
+const ROAD_W = 9;         // 路面寬（公尺）
+
+const canvas = document.getElementById('gl');
+const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0E1116);
+scene.fog = new THREE.Fog(0x0E1116, 140, 360);
+
+const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 900);
+
+scene.add(new THREE.HemisphereLight(0x9fb6d6, 0x2b3026, 0.8));
+const sun = new THREE.DirectionalLight(0xfff1d4, 0.95);
+sun.position.set(56, 82, 38);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.near = 10;
+sun.shadow.camera.far = 280;
+sun.shadow.camera.left = -95; sun.shadow.camera.right = 95;
+sun.shadow.camera.top = 95;   sun.shadow.camera.bottom = -95;
+sun.shadow.bias = -0.0004;
+if ('normalBias' in sun.shadow) sun.shadow.normalBias = 0.03;
+scene.add(sun);
+
+function noiseTex(baseHex, amp, size){
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(size, size);
+  const col = new THREE.Color(baseHex);
+  for (let i=0;i<img.data.length;i+=4){
+    const n = (Math.random() - 0.5) * amp * 255;
+    img.data[i]   = Math.max(0, Math.min(255, col.r*255 + n));
+    img.data[i+1] = Math.max(0, Math.min(255, col.g*255 + n));
+    img.data[i+2] = Math.max(0, Math.min(255, col.b*255 + n));
+    img.data[i+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+const grassTex = noiseTex(0x55633F, 0.13, 128);
+grassTex.repeat.set(70, 70);
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(760, 760),
+  new THREE.MeshStandardMaterial({ map: grassTex, roughness: 1, metalness: 0 })
+);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+/* 跑道中心線：長直線 + 大彎 + 髮夾彎 */
+const CP = [
+  [ 46,  -2], [ 60,  22], [ 50,  48], [ 20,  56], [ -6,  46],
+  [-20,  56], [-46,  50], [-58,  26], [-48,   2], [-24,  -8],
+  [-34, -30], [-18, -46], [ 12, -50], [ 34, -40], [ 44, -20]
+];
+const curve = new THREE.CatmullRomCurve3(
+  CP.map(function(p){ return new THREE.Vector3(p[0], 0, p[1]); }), true, 'catmullrom', 0.5
+);
+const TRACK_LEN = curve.getLength();
+const SAMPLES = 600;
+const pts = [], tans = [];
+for (let i=0;i<SAMPLES;i++){
+  const u = i / SAMPLES;
+  pts.push(curve.getPointAt(u));
+  tans.push(curve.getTangentAt(u).normalize());
+}
+
+/* 路面帶狀網格（含 UV，正面朝上） */
+function ribbon(inner, outer, y, vTile){
+  const pos = [], uv = [], idx = [];
+  const N = pts.length;
+  for (let i=0;i<=N;i++){
+    const k = i % N;
+    const p = pts[k], t = tans[k];
+    const nx = -t.z, nz = t.x;
+    pos.push(p.x + nx*outer, y, p.z + nz*outer);
+    pos.push(p.x + nx*inner, y, p.z + nz*inner);
+    const v = i * (vTile || 0.4);
+    uv.push(0, v, 1, v);
+  }
+  for (let i=0;i<N;i++){
+    const a = i*2, b = i*2+1, c = i*2+2, d = i*2+3;
+    idx.push(a, c, b, b, c, d);   // 逆時針 → 法線朝上
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+const asphaltTex = noiseTex(0x2E333B, 0.09, 128);
+const road = new THREE.Mesh(
+  ribbon(-ROAD_W/2, ROAD_W/2, 0.02, 0.5),
+  new THREE.MeshStandardMaterial({ map: asphaltTex, roughness: 0.95, metalness: 0 })
+);
+road.receiveShadow = true;
+scene.add(road);
+
+const shoulderMat = new THREE.MeshStandardMaterial({ color: 0xE6DFD2, roughness: 0.8 });
+scene.add(new THREE.Mesh(ribbon(ROAD_W/2, ROAD_W/2 + 0.35, 0.035), shoulderMat));
+scene.add(new THREE.Mesh(ribbon(-ROAD_W/2 - 0.35, -ROAD_W/2, 0.035), shoulderMat));
+
+/* 中線虛線 */
+(function centerLine(){
+  const dashMat = new THREE.MeshStandardMaterial({ color: 0xF2EDE3, roughness: 0.7 });
+  const dashGeo = new THREE.PlaneGeometry(0.22, 2.6);
+  for (let i=0;i<pts.length;i+=14){
+    const p = pts[i], t = tans[i];
+    const m = new THREE.Mesh(dashGeo, dashMat);
+    m.rotation.x = -Math.PI/2;
+    m.rotation.z = Math.atan2(t.x, t.z);
+    m.position.set(p.x, 0.045, p.z);
+    scene.add(m);
+  }
+})();
+
+/* 起跑線與門架 */
+(function startLine(){
+  const p = pts[0], t = tans[0];
+  const g = new THREE.Group();
+  const light = new THREE.MeshStandardMaterial({ color: 0xF2EDE3, roughness: 0.7 });
+  const dark  = new THREE.MeshStandardMaterial({ color: 0x14181E, roughness: 0.8 });
+  const cell = new THREE.PlaneGeometry(ROAD_W/9, 0.7);
+  for (let r=0;r<2;r++){
+    for (let c=0;c<9;c++){
+      const m = new THREE.Mesh(cell, (r+c) % 2 ? dark : light);
+      m.rotation.x = -Math.PI/2;
+      m.position.set(-ROAD_W/2 + (ROAD_W/9)*(c+0.5), 0.055, (r-0.5)*0.7);
+      g.add(m);
+    }
+  }
+  const postMat = new THREE.MeshStandardMaterial({ color: 0xFFC53D, roughness: 0.5, metalness: 0.1 });
+  const half = ROAD_W/2 + 1.3;
+  for (let s=-1;s<=1;s+=2){
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.34, 7, 0.34), postMat);
+    post.position.set(s*half, 3.5, 0);
+    post.castShadow = true;
+    g.add(post);
+  }
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(half*2 + 0.34, 0.55, 0.3), postMat);
+  beam.position.set(0, 6.8, 0);
+  beam.castShadow = true;
+  g.add(beam);
+
+  g.position.set(p.x, 0, p.z);
+  g.rotation.y = Math.atan2(t.x, t.z);
+  scene.add(g);
+})();
+
+/* 三角錐、樹、遠處建築 */
+(function props(){
+  const coneMat = new THREE.MeshStandardMaterial({ color: 0xFF6B35, roughness: 0.6 });
+  const coneGeo = new THREE.ConeGeometry(0.34, 1.0, 10);
+  for (let i=0;i<pts.length;i+=50){
+    const p = pts[i], t = tans[i];
+    const c = new THREE.Mesh(coneGeo, coneMat);
+    c.position.set(p.x + (-t.z)*(ROAD_W/2+1.2), 0.5, p.z + (t.x)*(ROAD_W/2+1.2));
+    c.castShadow = true;
+    scene.add(c);
+  }
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x483A2C, roughness: 1 });
+  const leafMat  = new THREE.MeshStandardMaterial({ color: 0x3D5334, roughness: 1 });
+  const bldA = new THREE.MeshStandardMaterial({ color: 0x39414D, roughness: 0.9 });
+  const bldB = new THREE.MeshStandardMaterial({ color: 0x2B323C, roughness: 0.9 });
+  function clear(x, z, min){
+    for (let i=0;i<pts.length;i+=5){
+      const dx = pts[i].x - x, dz = pts[i].z - z;
+      if (dx*dx + dz*dz < min*min) return false;
+    }
+    return true;
+  }
+  let placed = 0, guard = 0;
+  while (placed < 46 && guard < 1200){
+    guard++;
+    const x = (Math.random()-0.5)*300, z = (Math.random()-0.5)*300;
+    if (!clear(x, z, 13)) continue;
+    if (Math.random() < 0.66){
+      const h = 3 + Math.random()*3;
+      const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, h, 7), trunkMat);
+      tr.position.set(x, h/2, z); tr.castShadow = true; scene.add(tr);
+      const lf = new THREE.Mesh(new THREE.ConeGeometry(1.5 + Math.random(), 3.4 + Math.random()*2, 9), leafMat);
+      lf.position.set(x, h + 1.5, z); lf.castShadow = true; scene.add(lf);
+    } else {
+      const w = 6 + Math.random()*12, d = 6 + Math.random()*12, h = 5 + Math.random()*16;
+      const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), Math.random() < 0.5 ? bldA : bldB);
+      b.position.set(x, h/2, z);
+      b.rotation.y = Math.random()*Math.PI;
+      b.castShadow = true; b.receiveShadow = true;
+      scene.add(b);
+    }
+    placed++;
+  }
+})();
+
+/* =====================================================================
+   3. 車輛
+   ---------------------------------------------------------------------
+   carPivot  位置 + 行進方向
+    └ carAlign  自動置中、貼地、縮放（在旋轉之外，所以位移不會被轉歪）
+       └ carOrient  使用者的方向修正
+          └ carMesh  實際網格
+   ===================================================================== */
+const carPivot  = new THREE.Group();
+const carAlign  = new THREE.Group();
+const carOrient = new THREE.Group();
+const carMesh   = new THREE.Group();
+carAlign.add(carOrient);
+carOrient.add(carMesh);
+carPivot.add(carAlign);
+scene.add(carPivot);
+
+let autoYaw = 0, userYaw = 0, flipped = false, userScale = 1, fitScale = 1;
+let overrideColor = false;
+let rawLongest = 0, triCount = 0;
+const materials = [];
+
+function clearCar(){
+  while (carMesh.children.length){
+    const m = carMesh.children.pop();
+    if (m.geometry) m.geometry.dispose();
+    if (m.material) m.material.dispose();
+  }
+  materials.length = 0;
+}
+
+function measure(){
+  // 把 pivot 暫時歸零，量出「pivot 座標系」裡的包圍盒
+  const sp = carPivot.position.clone(), sr = carPivot.rotation.y;
+  carPivot.position.set(0,0,0);
+  carPivot.rotation.y = 0;
+  carAlign.position.set(0,0,0);
+  carAlign.scale.setScalar(1);
+  carPivot.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(carOrient);
+  carPivot.position.copy(sp);
+  carPivot.rotation.y = sr;
+  carPivot.updateMatrixWorld(true);
+  return box;
+}
+
+function fitModel(pickForward){
+  if (!carMesh.children.length) return;
+
+  // 第一輪：只套用「直立修正」，判斷車身長軸是 X 還是 Z
+  carOrient.rotation.set(flipped ? -Math.PI/2 : 0, 0, 0);
+  let box = measure();
+  if (!isFinite(box.min.x)) return;
+  let size = box.getSize(new THREE.Vector3());
+  if (pickForward) autoYaw = size.x > size.z ? Math.PI/2 : 0;
+
+  // 第二輪：套用最終轉向後重新量測，算出縮放與置中位移
+  carOrient.rotation.y = autoYaw + userYaw;
+  box = measure();
+  size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+
+  rawLongest = Math.max(size.x, size.z, 0.000001);
+  fitScale = CAR_LENGTH / rawLongest;
+  const s = fitScale * userScale;
+  carAlign.scale.setScalar(s);
+  carAlign.position.set(-center.x*s, -box.min.y*s, -center.z*s);
+
+  const info = document.getElementById('minfo');
+  if (info){
+    info.textContent = '模型 ' + triCount.toLocaleString() + ' 面 · 原始長度 '
+      + rawLongest.toFixed(1) + ' 單位 → 車長 ' + (CAR_LENGTH*userScale).toFixed(1) + ' m';
+  }
+}
+
+function applyColorMode(){
+  const hex = document.getElementById('color').value;
+  for (let i=0;i<materials.length;i++){
+    const m = materials[i];
+    if (overrideColor){ m.color.set(hex); m.vertexColors = false; }
+    else { m.color.copy(m.userData.baseColor); m.vertexColors = !!m.userData.hadVertexColors; }
+    m.needsUpdate = true;
+  }
+}
+
+function buildCar(parsed){
+  clearCar();
+  flipped = !!parsed.zUp;
+  userYaw = 0;
+  userScale = 1;
+  overrideColor = false;
+  triCount = 0;
+
+  document.getElementById('scale').value = 1;
+  document.getElementById('vScale').textContent = '1.0×';
+  document.getElementById('flip').setAttribute('aria-pressed', String(flipped));
+  document.getElementById('ownColor').setAttribute('aria-pressed', 'true');
+  document.getElementById('ownColor').textContent = '用模型原色';
+
+  for (let i=0;i<parsed.parts.length;i++){
+    const part = parsed.parts[i];
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(part.positions, 3));
+    if (part.indices) g.setIndex(new THREE.BufferAttribute(part.indices, 1));
+    if (part.normals) g.setAttribute('normal', new THREE.Float32BufferAttribute(part.normals, 3));
+    if (part.colors)  g.setAttribute('color',  new THREE.Float32BufferAttribute(part.colors, 3));
+    if (!part.normals) g.computeVertexNormals();
+    triCount += (part.indices ? part.indices.length : part.positions.length/3) / 3;
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(part.color[0], part.color[1], part.color[2]),
+      vertexColors: !!part.colors,
+      roughness: 0.55, metalness: 0.12,
+      transparent: part.opacity < 1,
+      opacity: part.opacity,
+      side: THREE.DoubleSide
+    });
+    mat.userData.baseColor = mat.color.clone();
+    mat.userData.hadVertexColors = !!part.colors;
+    materials.push(mat);
+
+    const mesh = new THREE.Mesh(g, mat);
+    mesh.castShadow = true;
+    carMesh.add(mesh);
+  }
+
+  fitModel(true);
+  applyColorMode();
+  resetRun();
+}
+
+/* 範例車：沒有檔案也能先玩 */
+function demoCar(){
+  const parts = [];
+  function push(geo, cx, cy, cz, col){
+    const p = Float32Array.prototype.slice.call(geo.attributes.position.array);
+    for (let i=0;i<p.length;i+=3){ p[i] += cx; p[i+1] += cy; p[i+2] += cz; }
+    parts.push({
+      positions: p,
+      normals: new Float32Array(geo.attributes.normal.array),
+      colors: null,
+      indices: geo.index ? new Uint32Array(geo.index.array) : null,
+      color: col, opacity: 1
+    });
+    geo.dispose();
+  }
+  const red = [0.86,0.23,0.17], dark = [0.09,0.10,0.12], glass = [0.55,0.71,0.79];
+  push(new THREE.BoxGeometry(1.9, 0.58, 4.2), 0, 0.63, 0, red);
+  push(new THREE.BoxGeometry(1.7, 0.55, 2.1), 0, 1.14, -0.15, red);
+  push(new THREE.BoxGeometry(1.74, 0.26, 1.2), 0, 1.32, -0.15, glass);
+  const wheels = [[-0.95,1.35],[0.95,1.35],[-0.95,-1.35],[0.95,-1.35]];
+  for (let i=0;i<wheels.length;i++){
+    const g = new THREE.CylinderGeometry(0.42, 0.42, 0.3, 14);
+    g.rotateZ(Math.PI/2);
+    push(g, wheels[i][0], 0.42, wheels[i][1], dark);
+  }
+  return { parts: parts, zUp: false };
+}
+
+/* =====================================================================
+   4. 行駛與計時
+   ===================================================================== */
+let mode = 'auto';
+let camMode = 'chase';
+let targetKmh = 40;
+let u = 0;
+const car = { pos: new THREE.Vector3(), heading: 0, speed: 0 };
+const keys = {};
+let laps = 0, lapStart = 0, best = null, lastProg = 0, offTrack = false, ready = false;
+
+function $(id){ return document.getElementById(id); }
+
+function resetRun(){
+  u = 0;
+  car.pos.copy(pts[0]);
+  car.heading = Math.atan2(tans[0].x, tans[0].z);
+  car.speed = 0;
+  laps = 0; best = null; lastProg = 0;
+  lapStart = performance.now();
+  $('lapnum').textContent = '0';
+  $('tBest').innerHTML = '--<small>s</small>';
+  place();
+}
+
+function place(){
+  carPivot.position.copy(car.pos);
+  carPivot.rotation.y = car.heading;
+}
+
+function nearest(pos){
+  let bi = 0, bd = Infinity;
+  for (let i=0;i<pts.length;i+=2){
+    const dx = pts[i].x - pos.x, dz = pts[i].z - pos.z;
+    const d = dx*dx + dz*dz;
+    if (d < bd){ bd = d; bi = i; }
+  }
+  return { prog: bi / pts.length, dist: Math.sqrt(bd) };
+}
+
+function fmt(ms){ return (ms/1000).toFixed(1); }
+
+function tick(dt){
+  const maxSpeed = targetKmh / 3.6;
+
+  if (mode === 'auto'){
+    u = (u + (maxSpeed*dt) / TRACK_LEN) % 1;
+    const p = curve.getPointAt(u), t = curve.getTangentAt(u).normalize();
+    car.pos.copy(p);
+    car.heading = Math.atan2(t.x, t.z);
+    car.speed = maxSpeed;
+  } else {
+    const acc = keys.up ? 9 : (keys.down ? -8 : 0);
+    car.speed += acc*dt;
+    car.speed *= (1 - 0.7*dt);
+    car.speed = Math.max(-maxSpeed*0.4, Math.min(maxSpeed, car.speed));
+    const steer = (keys.left ? 1 : 0) - (keys.right ? 1 : 0);
+    const grip = Math.min(1, Math.abs(car.speed)/4 + 0.18);
+    car.heading += steer * dt * 1.8 * grip * (car.speed < -0.05 ? -1 : 1);
+    car.pos.x += Math.sin(car.heading) * car.speed * dt;
+    car.pos.z += Math.cos(car.heading) * car.speed * dt;
+  }
+  place();
+
+  const n = nearest(car.pos);
+  const isOff = n.dist > ROAD_W/2 + 0.7;
+  if (isOff !== offTrack){
+    offTrack = isOff;
+    $('offtrack').style.display = isOff ? 'block' : 'none';
+  }
+
+  if (lastProg > 0.85 && n.prog < 0.15){
+    const t = performance.now() - lapStart;
+    if (t > 2500){
+      laps++;
+      lapStart = performance.now();
+      if (best === null || t < best){
+        best = t;
+        $('tBest').innerHTML = fmt(t) + '<small>s</small>';
+      }
+      const el = $('lapnum');
+      el.textContent = laps;
+      el.classList.add('flash');
+      setTimeout(function(){ el.classList.remove('flash'); }, 700);
+    }
+  }
+  lastProg = n.prog;
+
+  $('bar').style.width = (n.prog*100).toFixed(1) + '%';
+  $('tSpeed').innerHTML = Math.round(Math.abs(car.speed)*3.6) + '<small>km/h</small>';
+  $('tCur').innerHTML = fmt(performance.now() - lapStart) + '<small>s</small>';
+}
+
+/* 攝影機 */
+const orbit = { az: 0.8, el: 0.42, r: 34, dragging: false, lx: 0, ly: 0 };
+const camPos = new THREE.Vector3(0, 16, 30);
+const camTarget = new THREE.Vector3();
+let idleAz = 0.6;
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function updateCamera(dt){
+  const cp = carPivot.position;
+  if (!ready){
+    if (!reduceMotion) idleAz += dt*0.07;
+    const r = 100;
+    camPos.lerp(new THREE.Vector3(Math.cos(idleAz)*r, 52, Math.sin(idleAz)*r), Math.min(1, dt*2));
+    camTarget.lerp(new THREE.Vector3(0, 0, 0), Math.min(1, dt*2));
+  } else if (camMode === 'chase'){
+    const back = new THREE.Vector3(-Math.sin(carPivot.rotation.y), 0, -Math.cos(carPivot.rotation.y));
+    const want = cp.clone().add(back.multiplyScalar(11)).add(new THREE.Vector3(0, 5.2, 0));
+    camPos.lerp(want, Math.min(1, dt*3.6));
+    camTarget.lerp(cp.clone().add(new THREE.Vector3(0, 1.2, 0)), Math.min(1, dt*6));
+  } else if (camMode === 'top'){
+    camPos.lerp(new THREE.Vector3(cp.x*0.2, 140, cp.z*0.2 + 8), Math.min(1, dt*2.4));
+    camTarget.lerp(new THREE.Vector3(0, 0, 4), Math.min(1, dt*2.4));
+  } else {
+    const want = new THREE.Vector3(
+      cp.x + Math.cos(orbit.az)*Math.cos(orbit.el)*orbit.r,
+      cp.y + Math.sin(orbit.el)*orbit.r + 1,
+      cp.z + Math.sin(orbit.az)*Math.cos(orbit.el)*orbit.r
+    );
+    camPos.lerp(want, Math.min(1, dt*7));
+    camTarget.lerp(cp.clone().add(new THREE.Vector3(0, 1, 0)), Math.min(1, dt*7));
+  }
+  camera.position.copy(camPos);
+  camera.lookAt(camTarget);
+}
+
+/* =====================================================================
+   5. 介面
+   ===================================================================== */
+const startEl = $('start'), panel = $('panel'), hud = $('hud'), errEl = $('err');
+
+function showError(msg){
+  errEl.textContent = msg;
+  errEl.style.display = 'block';
+}
+function pressGroup(ids, active){
+  for (let i=0;i<ids.length;i++) $(ids[i]).setAttribute('aria-pressed', String(ids[i] === active));
+}
+function enterTrack(){
+  ready = true;
+  startEl.classList.add('hide');
+  panel.hidden = false;
+  panel.classList.remove('collapsed');
+  $('fold').textContent = '－';
+  hud.classList.remove('hide');
+}
+
+function handleFiles(fileList){
+  errEl.style.display = 'none';
+  const files = Array.prototype.slice.call(fileList || []);
+  if (!files.length) return;
+  const main = files.filter(function(f){ return /\.(glb|gltf|stl|obj)$/i.test(f.name); })[0];
+  if (!main){ showError('看不懂這個格式。請用 .glb、.stl 或 .obj。'); return; }
+  const mtl = files.filter(function(f){ return /\.mtl$/i.test(f.name); })[0];
+
+  const finish = function(parsed){
+    try {
+      buildCar(parsed);
+      enterTrack();
+      if (triCount > 300000) console.warn('模型面數偏高，可能會有點卡：' + triCount);
+    } catch (e){
+      showError((e && e.message) ? e.message : '模型讀進來了，但建立場景時出錯。');
+    }
+  };
+  const fail = function(e){
+    showError((e && e.message) ? e.message : '讀取失敗，請換個格式再試一次。');
+  };
+
+  if (/\.(glb|gltf)$/i.test(main.name)){
+    main.arrayBuffer().then(function(ab){ finish(parseGLTF(ab)); }).catch(fail);
+  } else if (/\.stl$/i.test(main.name)){
+    main.arrayBuffer().then(function(ab){ finish(parseSTL(ab)); }).catch(fail);
+  } else {
+    Promise.all([main.text(), mtl ? mtl.text() : Promise.resolve(null)])
+      .then(function(r){ finish(parseOBJ(r[0], r[1])); }).catch(fail);
+  }
+}
+
+$('file').addEventListener('change', function(e){ handleFiles(e.target.files); });
+$('file2').addEventListener('change', function(e){ handleFiles(e.target.files); });
+$('demo').addEventListener('click', function(){
+  buildCar(demoCar());
+  enterTrack();
+});
+$('pick').addEventListener('keydown', function(e){
+  if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); $('file').click(); }
+});
+
+const dropEl = $('drop');
+document.addEventListener('dragenter', function(e){ e.preventDefault(); dropEl.classList.add('over'); });
+document.addEventListener('dragover',  function(e){ e.preventDefault(); dropEl.classList.add('over'); });
+document.addEventListener('dragleave', function(e){ if (!e.relatedTarget) dropEl.classList.remove('over'); });
+document.addEventListener('drop', function(e){
+  e.preventDefault();
+  dropEl.classList.remove('over');
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+});
+
+$('fold').addEventListener('click', function(){
+  panel.classList.toggle('collapsed');
+  $('fold').textContent = panel.classList.contains('collapsed') ? '＋' : '－';
+});
+
+$('mAuto').addEventListener('click', function(){
+  u = nearest(car.pos).prog;
+  mode = 'auto';
+  pressGroup(['mAuto','mManual'], 'mAuto');
+  $('pad').style.display = 'none';
+  $('driveHint').textContent = '沿著跑道自動繞圈，速度可以調。';
+});
+$('mManual').addEventListener('click', function(){
+  mode = 'manual';
+  pressGroup(['mAuto','mManual'], 'mManual');
+  $('driveHint').textContent = '↑加速　↓煞車／倒車　←→轉向（也可用 WASD）。';
+  if (window.matchMedia('(pointer: coarse)').matches) $('pad').style.display = 'grid';
+});
+
+$('speed').addEventListener('input', function(e){
+  targetKmh = +e.target.value;
+  $('vSpeed').textContent = targetKmh + ' km/h';
+});
+$('scale').addEventListener('input', function(e){
+  userScale = +e.target.value;
+  $('vScale').textContent = userScale.toFixed(1) + '×';
+  fitModel(false);
+});
+$('yawL').addEventListener('click', function(){ userYaw += Math.PI/2; fitModel(false); });
+$('yawR').addEventListener('click', function(){ userYaw -= Math.PI/2; fitModel(false); });
+$('flip').addEventListener('click', function(){
+  flipped = !flipped;
+  $('flip').setAttribute('aria-pressed', String(flipped));
+  fitModel(true);
+});
+$('ownColor').addEventListener('click', function(){
+  overrideColor = !overrideColor;
+  $('ownColor').setAttribute('aria-pressed', String(!overrideColor));
+  $('ownColor').textContent = overrideColor ? '用下面的顏色' : '用模型原色';
+  applyColorMode();
+});
+$('color').addEventListener('input', function(){
+  overrideColor = true;
+  $('ownColor').setAttribute('aria-pressed', 'false');
+  $('ownColor').textContent = '用下面的顏色';
+  applyColorMode();
+});
+$('cChase').addEventListener('click', function(){ camMode = 'chase'; pressGroup(['cChase','cTop','cFree'], 'cChase'); });
+$('cTop').addEventListener('click',   function(){ camMode = 'top';   pressGroup(['cChase','cTop','cFree'], 'cTop'); });
+$('cFree').addEventListener('click',  function(){ camMode = 'free';  pressGroup(['cChase','cTop','cFree'], 'cFree'); });
+$('reset').addEventListener('click', resetRun);
+$('shot').addEventListener('click', function(){
+  renderer.render(scene, camera);
+  const a = document.createElement('a');
+  a.download = 'my-car-on-track.png';
+  a.href = canvas.toDataURL('image/png');
+  a.click();
+});
+
+const KEYMAP = {
+  ArrowUp:'up', ArrowDown:'down', ArrowLeft:'left', ArrowRight:'right',
+  w:'up', s:'down', a:'left', d:'right', W:'up', S:'down', A:'left', D:'right'
+};
+window.addEventListener('keydown', function(e){
+  const k = KEYMAP[e.key];
+  if (k){ keys[k] = true; if (mode === 'manual') e.preventDefault(); }
+});
+window.addEventListener('keyup', function(e){
+  const k = KEYMAP[e.key];
+  if (k) keys[k] = false;
+});
+
+const padBtns = $('pad').querySelectorAll('button');
+for (let i=0;i<padBtns.length;i++){
+  (function(b){
+    const k = b.getAttribute('data-k');
+    b.addEventListener('pointerdown', function(e){ e.preventDefault(); keys[k] = true; });
+    b.addEventListener('pointerup',   function(e){ e.preventDefault(); keys[k] = false; });
+    b.addEventListener('pointerleave',function(){ keys[k] = false; });
+    b.addEventListener('pointercancel',function(){ keys[k] = false; });
+  })(padBtns[i]);
+}
+
+canvas.addEventListener('pointerdown', function(e){
+  if (camMode !== 'free' || !ready) return;
+  orbit.dragging = true; orbit.lx = e.clientX; orbit.ly = e.clientY;
+});
+window.addEventListener('pointerup', function(){ orbit.dragging = false; });
+window.addEventListener('pointermove', function(e){
+  if (!orbit.dragging) return;
+  orbit.az -= (e.clientX - orbit.lx) * 0.006;
+  orbit.el = Math.max(0.06, Math.min(1.45, orbit.el + (e.clientY - orbit.ly) * 0.005));
+  orbit.lx = e.clientX; orbit.ly = e.clientY;
+});
+canvas.addEventListener('wheel', function(e){
+  if (camMode !== 'free' || !ready) return;
+  e.preventDefault();
+  orbit.r = Math.max(7, Math.min(190, orbit.r * (1 + (e.deltaY > 0 ? 1 : -1) * 0.09)));
+}, { passive: false });
+
+/* =====================================================================
+   6. 主迴圈
+   ===================================================================== */
+function resize(){
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+car.pos.copy(pts[0]);
+car.heading = Math.atan2(tans[0].x, tans[0].z);
+place();
+
+let last = performance.now();
+function loop(now){
+  requestAnimationFrame(loop);
+  const t = now || performance.now();
+  const dt = Math.min(0.05, (t - last) / 1000);
+  last = t;
+  if (ready) tick(dt);
+  updateCamera(dt);
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
