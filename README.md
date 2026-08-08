@@ -1,4 +1,4 @@
-# 跑道測試場 · Tinkercad Car Test Track
+# [跑道測試場 · Tinkercad Car Test Track](https://allenlin316.github.io/tinkercad-test-track/)
 
 把你在 [Tinkercad](https://www.tinkercad.com/) 設計的車子匯出後，直接丟到這個網頁裡，就能在一條有直線、大彎、髮夾彎的跑道上開圈計時。純前端、單一 HTML 檔案，不需要任何後端或建置流程。
 
