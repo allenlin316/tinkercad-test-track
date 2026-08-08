@@ -868,32 +868,22 @@ function buildCar(parsed){
   resetRun();
 }
 
-/* 範例車：沒有檔案也能先玩 */
-function demoCar(){
-  const parts = [];
-  function push(geo, cx, cy, cz, col){
-    const p = Float32Array.prototype.slice.call(geo.attributes.position.array);
-    for (let i=0;i<p.length;i+=3){ p[i] += cx; p[i+1] += cy; p[i+2] += cz; }
-    parts.push({
-      positions: p,
-      normals: new Float32Array(geo.attributes.normal.array),
-      colors: null,
-      indices: geo.index ? new Uint32Array(geo.index.array) : null,
-      color: col, opacity: 1
+/* 預設車：黃色跑車（finished_cars/yellow_sport_car.glb） */
+const DEFAULT_CAR_URL = 'finished_cars/yellow_sport_car.glb';
+function loadDefaultCar(){
+  errEl.style.display = 'none';
+  return fetch(DEFAULT_CAR_URL)
+    .then(function(res){
+      if (!res.ok) throw new Error('找不到預設車款檔案：' + DEFAULT_CAR_URL);
+      return res.arrayBuffer();
+    })
+    .then(function(ab){
+      buildCar(parseGLTF(ab));
+      enterTrack();
+    })
+    .catch(function(e){
+      showError((e && e.message) ? e.message : '預設車款載入失敗，請自行選擇檔案。');
     });
-    geo.dispose();
-  }
-  const red = [0.86,0.23,0.17], dark = [0.09,0.10,0.12], glass = [0.55,0.71,0.79];
-  push(new THREE.BoxGeometry(1.9, 0.58, 4.2), 0, 0.63, 0, red);
-  push(new THREE.BoxGeometry(1.7, 0.55, 2.1), 0, 1.14, -0.15, red);
-  push(new THREE.BoxGeometry(1.74, 0.26, 1.2), 0, 1.32, -0.15, glass);
-  const wheels = [[-0.95,1.35],[0.95,1.35],[-0.95,-1.35],[0.95,-1.35]];
-  for (let i=0;i<wheels.length;i++){
-    const g = new THREE.CylinderGeometry(0.42, 0.42, 0.3, 14);
-    g.rotateZ(Math.PI/2);
-    push(g, wheels[i][0], 0.42, wheels[i][1], dark);
-  }
-  return { parts: parts, zUp: false };
 }
 
 /* =====================================================================
@@ -1079,8 +1069,7 @@ function handleFiles(fileList){
 $('file').addEventListener('change', function(e){ handleFiles(e.target.files); });
 $('file2').addEventListener('change', function(e){ handleFiles(e.target.files); });
 $('demo').addEventListener('click', function(){
-  buildCar(demoCar());
-  enterTrack();
+  loadDefaultCar();
 });
 $('pick').addEventListener('keydown', function(e){
   if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); $('file').click(); }
@@ -1211,6 +1200,8 @@ resize();
 car.pos.copy(pts[0]);
 car.heading = Math.atan2(tans[0].x, tans[0].z);
 place();
+
+loadDefaultCar();
 
 let last = performance.now();
 function loop(now){
